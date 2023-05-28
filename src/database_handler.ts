@@ -1,7 +1,7 @@
 'use strict';
 
 // Types.
-import Flight from "./types";
+import {Flight} from "./types";
 import MariaDB, {Pool, PoolConnection} from "mariadb";
 
 /*
@@ -113,9 +113,9 @@ class DatabaseHandler {
             });
     }
 
-    private deserializeFlight(results: Array<any>): Flight[] {
+    private deserializeFlight(results: SQL_Leg[]): Flight[] {
         let collation: Flight[] = [];
-        results.forEach((item: LegSQL) => {
+        results.forEach((item: SQL_Leg) => {
             collation.push({
                     'origin': item.origin,
                     'destination': item.destination,
@@ -125,6 +125,25 @@ class DatabaseHandler {
                 });
         });
         return collation;
+    }
+
+    public async getFlightsFrom(origin: string): Promise<Array<Flight>> {
+        return new Promise((resolve) => {
+            this.db.getConnection()
+                .then(async (connection: PoolConnection) => {
+                    const query: string =
+                        ' SELECT * FROM ' + this.database + '.`legs` WHERE `origin` = ?; ';
+                    connection.query(query, [origin])
+                        .then((results) => {
+                            console.log('[Database] Tables validated successfully.');
+                            console.log('getFlightsFrom origin', origin, 'results', results);
+                            resolve(results);
+                        })
+                        .finally(() => {
+                            connection.release().then();
+                        });
+                });
+        });
     }
 
     public async getFlightsFromTo(origin: string, dest: string): Promise<Array<Flight>> {
@@ -147,26 +166,7 @@ class DatabaseHandler {
         });
     }
 
-    public async getFlightsFrom(origin: string): Promise<Array<Flight>> {
-        return new Promise((resolve) => {
-            this.db.getConnection()
-                .then(async (connection: PoolConnection) => {
-                    const query: string =
-                        ' SELECT * FROM ' + this.database + '.`legs` WHERE `origin` = ?; ';
-                    connection.query(query, [origin])
-                        .then((results) => {
-                            console.log('[Database] Tables validated successfully.');
-                            console.log('getFlightsFrom origin', origin, 'results', results);
-                            resolve(results);
-                        })
-                        .finally(() => {
-                            connection.release().then();
-                        });
-                });
-        });
-    }
-
-    public async getFlightsNoBacktrack(origin: string, visited: Flight[]): Promise<Flight[]> {
+    public async getFlightsFromNoBacktrack(origin: string, visited: Flight[]): Promise<Flight[]> {
         if (visited.length == 0) {
             return this.getFlightsFrom(origin);
         }

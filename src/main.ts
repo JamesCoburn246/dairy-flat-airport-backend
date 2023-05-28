@@ -11,7 +11,7 @@ import express, {Express, Request, Response} from "express";
 import cors from "cors";
 import helmet from "helmet";
 // Types.
-import Flight from "./types";
+import {Flight} from "./types";
 
 dotenv.config();
 
@@ -88,7 +88,7 @@ app.get('/api/flights', async (req: express.Request<{}, {}, {}, HttpGetFlightsQu
 
 async function findRoutesBFS(origin: string, dest: string, route: Flight[]): Promise<Array<Flight[]>> {
     // get flights from origin, NOT going to path (no backtrack)
-    const flightsLeavingOrigin: Flight[] = await database_handler.getFlightsNoBacktrack(origin, route);
+    const flightsLeavingOrigin: Flight[] = await database_handler.getFlightsFromNoBacktrack(origin, route);
 
     // Check if the route can be completed in 1 flight.
     const routes: Array<Flight[]> = [];
