@@ -1,31 +1,43 @@
-interface Booking {
-    reference: string
+export interface Booking {
+    booking_id: string
+    customer: User
     flights: Flight[]
 }
 
-interface Flight {
-    origin: string, // Refers to Airport.icao
-    destination: string, // Refers to Airport.icao
-    depart: string,
-    arrive: string,
-    service: number  // Refers to SQL_Service.id
+export interface User {
+    name: string
+    email: string
 }
 
-interface Airport {
-    icao: string,
-    name: string,
-    country: string,
-    timezone: string,
+export interface Flight {
+    flight_id: number
+    route: Route
+    date: string // Only refers to the calendar date - departure/arrival is in Route.
 }
 
-interface Service {
-    name: string,
+export interface Route {
+    route_id: string
+    origin: string // Refers to Airport.icao
+    destination: string // Refers to Airport.icao
+    depart: string
+    arrive: string
+    service: number  // Refers to Service.service_id
+}
+
+export interface Airport {
+    icao: string
+    name: string
+    country: string
+    timezone: string
+}
+
+export interface Service {
+    service_id: number
+    name: string
     jet: Jet
 }
 
-interface Jet {
-    name: string,
+export interface Jet {
+    name: string
     capacity: number
 }
-
-export {Booking, Flight, Airport, Service, Jet};
