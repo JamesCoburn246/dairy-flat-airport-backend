@@ -157,12 +157,7 @@ function findRoutesBFS(origin: string, dest: string, route: Route[]): Array<Rout
 }
 
 function generateBookingReference(): string {
-    return 'B' + Math.random().toString(36).slice(2, 9).toUpperCase();
-}
-
-function generateFightNumber() {
-    return 'DF-' + Math.random().toString().slice(2, 7).toUpperCase();
+    return 'B' + Math.random().toString(36).slice(2, 7).toUpperCase();
 }
 
 console.log(generateBookingReference());
-console.log(generateFightNumber());

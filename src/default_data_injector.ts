@@ -1,20 +1,7 @@
 'use strict';
 
 // NPM imports.s
-import Database, {Statement, Transaction} from 'better-sqlite3';
-
-// Types.
-import {Airport, Booking, Flight, Jet, Route, Service, User} from "./types";
-import {
-    SQL_Airport,
-    SQL_Booking,
-    SQL_Flight_Booking,
-    SQL_Flight,
-    SQL_User,
-    SQL_Route,
-    SQL_Service,
-    SQL_Jet
-} from "./sql_types";
+import Database, {Statement} from 'better-sqlite3';
 
 /*
  * A class to handler all direct interactions with our database.
