@@ -1,10 +1,28 @@
 'use strict';
 
-// Types.
-import MariaDB, {Pool, PoolConnection} from "mariadb";
-import {Airport, Booking, Flight, Jet, Route, Service, User} from "./types";
-import {SQL_Airport, SQL_Booking, SQL_Flight_Booking, SQL_Flight, SQL_User, SQL_Route, SQL_Service, SQL_Jet} from "./sql_types";
+// Built-in imports.
+import * as fs from "fs";
+import path from "path";
+
+// NPM imports.
+import Database, {Statement, Transaction} from 'better-sqlite3';
+
+// Project imports.
 import DataInjector from "./default_data_injector";
+
+// Types.
+import {Airport, Booking, Flight, Jet, Route, Service, User} from "./types";
+import {
+    SQL_Airport,
+    SQL_Booking,
+    SQL_Flight_Booking,
+    SQL_Flight,
+    SQL_User,
+    SQL_Route,
+    SQL_Service,
+    SQL_Jet
+} from "./sql_types";
+
 
 /*
  * A class to handler all direct interactions with our database.
@@ -12,305 +30,278 @@ import DataInjector from "./default_data_injector";
  * original callers. The errors should be handled there, instead.
  */
 class DatabaseHandler {
-    db: Pool;
-    database: string;
+    db: Database.Database;
 
-    constructor(DB_HOST: string, DB_PORT: number, DB_USER: string, DB_PASSWORD: string, DB_DATABASE: string) {
-        this.db = MariaDB.createPool({
-            host: DB_HOST,
-            port: DB_PORT,
-            user: DB_USER,
-            password: DB_PASSWORD,
-            debug: false,
-            trace: true
-        });
-        this.database = DB_DATABASE;
+    constructor(PATH: string, FILE_NAME: string) {
+        const directoryPath: string = path.join(__dirname, PATH);
+        const filePath: string = path.join(directoryPath, FILE_NAME);
+
+        // Ensure directory exists.
+        if (!fs.existsSync(directoryPath)) {
+            fs.mkdirSync(directoryPath, {recursive: true});
+        }
+
+        // Ensure database file exists.
+        fs.writeFileSync(filePath, '');
+
+        // Access database file.
+        this.db = new Database(filePath);
 
         // Test the connection.
-        this.db.getConnection()
-            .then((connection: PoolConnection) => {
-                connection.query('SELECT 1;')
-                    .then(() => {
-                        console.info('[Database] Connected to the database.');
-                    })
-                    .catch((reason) => {
-                        console.error('[Database] Error. Is the SQL server running? Are the details right?');
-                        console.error('[Database] Error message:\n\n', reason);
-                    })
-                    .finally(() => {
-                        connection.release().then();
-                    });
-            })
-            .catch((reason) => {
-                console.error('[Database] Could not acquire a connection. Are the settings correct?')
-                console.error(reason);
-            });
+        const result = this.db.prepare('SELECT 1; ').get();
+        if (result) {
+            console.info('[Database] Connected to the database.');
+        } else {
+            console.error('[Database] Error. Is the SQL server running? Are the details right?');
+        }
 
         // Validate the tables. If they don't exist yet, create them.
-        this.validateTables().catch((error) => {
-            console.error(`[Database] Encountered an error while validating and initializing database!\n${error}`);
-        });
+        this.validateTables();
 
         // Inject default data into the database.
         const inj: DataInjector = new DataInjector();
         inj.injectData(this.db);
     }
 
-    private async validateTables(): Promise<void> {
-        this.db.getConnection()
-            .then(async (connection: PoolConnection) => {
-                const create_database_query =
-                    'CREATE DATABASE IF NOT EXISTS `' + this.database + '`; ';
-                const use_database_query =
-                    'USE `' + this.database + '`; ';
-                const create_bookings_table_query =
-                    'CREATE TABLE IF NOT EXISTS ' + this.database + '.`bookings` ( ' +
-                    '  `booking_id` char(8) NOT NULL, ' +
-                    '  `user_id` int(11) NOT NULL, ' +
-                    '  PRIMARY KEY (`booking_id`) ' +
-                    ') ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci; ';
-                const create_users_table_query =
-                    'CREATE TABLE IF NOT EXISTS ' + this.database + '.`users` ( ' +
-                    '  `user_id` int(11) NOT NULL AUTO_INCREMENT, ' +
-                    '  `name` varchar(32) NOT NULL, ' +
-                    '  `email` varchar(320) NOT NULL, ' +
-                    '  PRIMARY KEY (`user_id`), ' +
-                    '  UNIQUE KEY `email` (`email`) ' +
-                    ') ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci; ';
-                const create_flights_table_query =
-                    'CREATE TABLE IF NOT EXISTS `flights` ( ' +
-                    '  `flight_id` int(11) NOT NULL, ' +
-                    '  `route_id` int(11) NOT NULL, ' +
-                    '  `date` varchar(32) NOT NULL, ' +
-                    '  PRIMARY KEY (`flight_id`) ' +
-                    ') ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci; ';
-                const create_flight_bookings_table_query =
-                    'CREATE TABLE IF NOT EXISTS `bookings` ( ' +
-                    '  `booking_id` char(6) NOT NULL, ' + // TODO
-                    '  `user_id` int(11) NOT NULL, ' +
-                    '  PRIMARY KEY (`booking_id`) ' +
-                    ') ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci';
-                const create_routes_table_query  =
-                    'CREATE TABLE IF NOT EXISTS ' + this.database + '.`routes` ( ' +
-                    '  `route_id` char(8) NOT NULL AUTO_INCREMENT, ' +
-                    '  `origin` char(4) NOT NULL, ' +
-                    '  `destination` char(4) NOT NULL, ' +
-                    '  `depart` varchar(16) NOT NULL, ' +
-                    '  `arrive` varchar(16) NOT NULL, ' +
-                    '  `service_id` int(11) NOT NULL, ' +
-                    '  PRIMARY KEY (`route_id`) ' +
-                    ' ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci; ';
-                const create_airports_table_query =
-                    'CREATE TABLE IF NOT EXISTS ' + this.database + '.`airports` ( ' +
-                    '  `icao` char(4) NOT NULL, ' +
-                    '  `name` varchar(32) NOT NULL, ' +
-                    '  `country` varchar(32) NOT NULL, ' +
-                    '  `timezone` text NOT NULL, ' +
-                    '  PRIMARY KEY (`icao`), ' +
-                    '  UNIQUE KEY `name` (`name`) ' +
-                    ') ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci; ';
-                const create_services_table_query=
-                    'CREATE TABLE IF NOT EXISTS ' + this.database + '.`services` ( ' +
-                    '  `service_id` int(11) NOT NULL AUTO_INCREMENT, ' +
-                    '  `name` varchar(64) NOT NULL, ' +
-                    '  `jet_id` smallint(6) NOT NULL, ' +
-                    '  PRIMARY KEY (`service_id`) ' +
-                    ') ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci; ';
-                const create_jets_table_query =
-                    'CREATE TABLE IF NOT EXISTS ' + this.database + '.`jets` ( ' +
-                    '  `jet_id` smallint(6) NOT NULL AUTO_INCREMENT, ' +
-                    '  `name` varchar(32) NOT NULL, ' +
-                    '  `capacity` smallint(6) NOT NULL, ' +
-                    '  PRIMARY KEY (`jet_id`) ' +
-                    ' ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci; ';
-                try {
-                    await connection.query(create_database_query)
-                    await connection.query(use_database_query)
-                    await connection.query(create_bookings_table_query)
-                    await connection.query(create_users_table_query)
-                    await connection.query(create_flights_table_query)
-                    await connection.query(create_flight_bookings_table_query)
-                    await connection.query(create_routes_table_query)
-                    await connection.query(create_airports_table_query)
-                    await connection.query(create_services_table_query)
-                    await connection.query(create_jets_table_query)
-                    console.log('[Database] Tables validated successfully.');
-                } catch (e) {
-                    console.error('[Database] Failed to generate tables.');
-                    console.error(e);
-                } finally {
-                    connection.release().then();
-                }
-            });
+    private validateTables(): void {
+        const create_bookings_table_query: Statement = this.db.prepare(
+            'CREATE TABLE IF NOT EXISTS bookings ( ' +
+            '  `booking_id` TEXT PRIMARY KEY, ' +
+            '  `user_id` INTEGER NOT NULL ' +
+            '); ');
+        const create_users_table_query: Statement = this.db.prepare(
+            'CREATE TABLE IF NOT EXISTS `users` ( ' +
+            '  `user_id` INTEGER PRIMARY KEY, ' +
+            '  `name` TEXT NOT NULL, ' +
+            '  `email` TEXT NOT NULL UNIQUE ' +
+            '); ');
+        const create_flights_table_query: Statement = this.db.prepare(
+            'CREATE TABLE IF NOT EXISTS `flights` ( ' +
+            '  `flight_id` INTEGER PRIMARY KEY, ' +
+            '  `route_id` TEXT NOT NULL, ' +
+            '  `date` TEXT NOT NULL ' +
+            '); ');
+        const create_flight_bookings_table_query: Statement = this.db.prepare(
+            'CREATE TABLE IF NOT EXISTS `flight_booking_junction` ( ' +
+            '  `id` INTEGER PRIMARY KEY, ' +
+            '  `booking_id` TEXT NOT NULL, ' +
+            '  `flight_id` INTEGER NOT NULL ' +
+            '); ');
+        const create_routes_table_query: Statement = this.db.prepare(
+            'CREATE TABLE IF NOT EXISTS `routes` ( ' +
+            '  `route_id` TEXT NOT NULL, ' +
+            '  `origin` TEXT NOT NULL, ' +
+            '  `destination` TEXT NOT NULL, ' +
+            '  `depart` TEXT NOT NULL, ' +
+            '  `arrive` TEXT NOT NULL, ' +
+            '  `service_id` INTEGER NOT NULL, ' +
+            '  PRIMARY KEY (`route_id`) ' +
+            ' ); ');
+        const create_airports_table_query: Statement = this.db.prepare(
+            'CREATE TABLE IF NOT EXISTS `airports` ( ' +
+            '  `icao` TEXT PRIMARY KEY, ' +
+            '  `name` TEXT NOT NULL UNIQUE, ' +
+            '  `country` TEXT NOT NULL, ' +
+            '  `timezone` TEXT NOT NULL ' +
+            '); ');
+        const create_services_table_query: Statement = this.db.prepare(
+            'CREATE TABLE IF NOT EXISTS `services` ( ' +
+            '  `service_id` INTEGER PRIMARY KEY, ' +
+            '  `name` TEXT NOT NULL, ' +
+            '  `jet_id` INTEGER NOT NULL ' +
+            '); ');
+        const create_jets_table_query: Statement = this.db.prepare(
+            'CREATE TABLE IF NOT EXISTS `jets` ( ' +
+            '  `jet_id` INTEGER PRIMARY KEY, ' +
+            '  `name` TEXT NOT NULL, ' +
+            '  `capacity` INTEGER NOT NULL ' +
+            ' ); ');
+
+        // Create an sqlite transaction.
+        const validate_tables: Transaction = this.db.transaction(function() {
+            create_bookings_table_query.run();
+            create_users_table_query.run();
+            create_flights_table_query.run();
+            create_flight_bookings_table_query.run();
+            create_routes_table_query.run();
+            create_airports_table_query.run();
+            create_services_table_query.run();
+            create_jets_table_query.run();
+        });
+
+        // Perform the transaction.
+        validate_tables();
     }
 
     // === Getters ===
 
-    private async select(query: string): Promise<any> {
-        return new Promise((resolve) => {
-            this.db.getConnection()
-                .then(async (connection: PoolConnection) => {
-                    connection.query(query)
-                        .then((results) => {
-                            resolve(results);
-                        })
-                        .finally(() => {
-                            connection.release().then();
-                        });
-                });
-        });
-    }
-
-    private async selectWith(query: string, values: any[]): Promise<any> {
-        return new Promise((resolve) => {
-            this.db.getConnection()
-                .then(async (connection: PoolConnection) => {
-                    connection.query(query, values)
-                        .then((results) => {
-                            resolve(results);
-                        })
-                        .finally(() => {
-                            connection.release().then();
-                        });
-                });
-        });
-    }
-
-    public async getBooking(booking_id: string) {
-        const query: string =
-            ' SELECT * FROM ' + this.database + '.`bookings`' +
+    public getBooking(booking_id: string): Booking {
+        const query: Statement = this.db.prepare(
+            ' SELECT * FROM `bookings`' +
             ' WHERE `booking_id` = ?' +
-            ' LIMIT 1; ';
-        return this.deserializeBooking(await this.selectWith(query, [booking_id]));
+            ' LIMIT 1; ');
+        return this.deserializeBooking(query.get(booking_id) as SQL_Booking);
     }
 
-    public async getUser(user_id: number) {
-        const query: string =
-            ' SELECT * FROM ' + this.database + '.`users`' +
+    public getUser(user_id: number): SQL_User {
+        const query: Statement = this.db.prepare(
+            ' SELECT * FROM `users`' +
             ' WHERE `user_id` = ?' +
-            ' LIMIT 1; ';
-        return this.deserializeUser(await this.selectWith(query, [user_id]));
+            ' LIMIT 1; ');
+        return query.get(user_id) as SQL_User;
     }
 
-    public async getUserIdByEmail(email: string): Promise<number> {
+    public getUserIdByEmail(email: string): number {
         // Note that a user's email is a unique field, so no collisions will occur.
-        const query: string =
-            ' SELECT `user_id` FROM ' + this.database + '.`users`' +
+        const query: Statement = this.db.prepare(
+            ' SELECT `user_id` FROM `users`' +
             ' WHERE `email` = ?' +
-            ' LIMIT 1; ';
-        const user: SQL_User = await this.selectWith(query, [email]);
+            ' LIMIT 1; ');
+        const user: SQL_User = query.get(email) as SQL_User;
         return user.user_id;
     }
 
-    private async getFlightsForBooking(booking_id: string) {
-        const first_query: string =
-            ' SELECT `flight_id` FROM ' + this.database + '.`booked_flights`' +
-            ' WHERE `booking_id` = ?; ';
-        const ids = await this.selectWith(first_query, [booking_id]);
-        const second_query: string =
-            ' SELECT * FROM ' + this.database + '.`flights`' +
-            ' WHERE `flight_id` IN (?); ';
-        return this.deserializeFlights(await this.selectWith(second_query, ids));
+    private getFlightsForBooking(booking_id: string) {
+        const first_query: Statement = this.db.prepare(
+            ' SELECT `flight_id` FROM `booked_flights`' +
+            ' WHERE `booking_id` = ?; ');
+        const ids = first_query.all(booking_id);
+        const second_query: Statement = this.db.prepare(
+            ' SELECT * FROM `flights`' +
+            ' WHERE `flight_id` IN (?); ');
+        return this.deserializeFlights(second_query.all(ids) as SQL_Flight[]);
     }
 
-    public async getRoute(route_id: string): Promise<Route> {
-        const query =
-            ' SELECT * FROM ' + this.database + '.`routes`' +
+    public getRoute(route_id: string): Route {
+        const query: Statement = this.db.prepare(
+            ' SELECT * FROM `routes`' +
             ' WHERE `route_id` = ?' +
-            ' LIMIT 1; ';
-        return this.deserializeRoutes(await this.selectWith(query, [route_id]))[0];
+            ' LIMIT 1; ');
+        return this.deserializeRoutes(query.all(route_id) as SQL_Route[])[0];
     }
 
-    public async getRoutesFrom(origin: string): Promise<Route[]> {
-        const query: string =
-            ' SELECT * FROM ' + this.database + '.`routes`' +
-            ' WHERE `origin` = ?; ';
-        return this.deserializeRoutes(await this.selectWith(query, [origin]));
+    public getRoutesFrom(origin: string): Route[] {
+        const query: Statement = this.db.prepare(
+            ' SELECT * FROM `routes`' +
+            ' WHERE `origin` = ?; ');
+        return this.deserializeRoutes(query.all(origin) as SQL_Route[]);
     }
 
-    public async getRoutesFromTo(origin: string, dest: string): Promise<Route[]> {
-        const query: string =
-            ' SELECT * FROM ' + this.database + '.`routes`' +
+    public getRoutesFromTo(origin: string, dest: string): Route[] {
+        const query: Statement = this.db.prepare(
+            ' SELECT * FROM `routes`' +
             ' WHERE `origin` = ?' +
-            ' AND `destination` = ?; ';
-        return this.deserializeRoutes(await this.selectWith(query, [origin, dest]));
+            ' AND `destination` = ?; ');
+        return this.deserializeRoutes(query.all(origin, dest) as SQL_Route[]);
     }
 
-    public async getRoutesFromNoBacktrack(origin: string, visited: Route[]): Promise<Route[]> {
+    public getRoutesFromNoBacktrack(origin: string, visited: Route[]): Route[] {
         if (visited.length == 0) {
             return this.getRoutesFrom(origin);
         } else {
-            const query: string =
-                ' SELECT * FROM ' + this.database + '.`routes`' +
+            const query: Statement = this.db.prepare(
+                ' SELECT * FROM `routes`' +
                 ' WHERE `origin` = ?' +
-                ' AND `destination` NOT IN (?); ';
-            return this.deserializeRoutes(await this.selectWith(query, [origin, visited]));
+                ' AND `destination` NOT IN (?); ');
+            return this.deserializeRoutes(query.all(origin, visited) as SQL_Route[]);
         }
     }
 
-    public async getAirport(airport_icao: string): Promise<Airport> {
-        const query: string =
-            ' SELECT * FROM ' + this.database + '.`airports`' +
+    public getAirport(airport_icao: string): Airport {
+        const query: Statement = this.db.prepare(
+            ' SELECT * FROM `airports`' +
             ' WHERE `icao` = ?' +
-            ' LIMIT 1; ';
-        return this.deserializeAirport(await this.selectWith(query, [airport_icao]));
+            ' LIMIT 1; ');
+        return this.deserializeAirport(query.get(airport_icao) as Airport);
     }
 
-    public async getAllAirports(): Promise<Airport[]> {
-        const query: string =
-            ' SELECT * FROM ' + this.database + '.`airports`; ';
-        const result = await this.select(query)
-        return this.deserializeAirports(result);
+    public getAllAirports(): Airport[] {
+        const query: Statement = this.db.prepare(
+            ' SELECT * FROM `airports`; ');
+        return this.deserializeAirports(query.all() as SQL_Airport[]);
     }
 
-    public async getService(service_id: number): Promise<Service> {
-        const query: string =
-            ' SELECT * FROM ' + this.database + '.`services`' +
+    public getService(service_id: number): Service {
+        const query: Statement = this.db.prepare(
+            ' SELECT * FROM `services`' +
             ' WHERE `service_id` = ?' +
-            ' LIMIT 1; ';
-        return this.deserializeService(await this.selectWith(query, [service_id]));
+            ' LIMIT 1; ');
+        return this.deserializeService(query.get(service_id) as SQL_Service);
     }
 
-    public async getJet(jet_id: number): Promise<Jet> {
-        const query: string =
-            ' SELECT * FROM ' + this.database + '.`jets`' +
+    public getJet(jet_id: number): Jet {
+        const query: Statement = this.db.prepare(
+            ' SELECT * FROM `jets`' +
             ' WHERE `jet_id` = ?' +
-            ' LIMIT 1; ';
-        return this.deserializeJet(await this.selectWith(query, [jet_id]));
+            ' LIMIT 1; ');
+        return this.deserializeJet(query.get(jet_id) as SQL_Jet);
+    }
+
+    // === Setters ===
+
+    public createFlightBookingsForUser(booking_id: string, flight_ids: string[], user: User): void {
+        // Create user in db, if not exists.
+        this.createUser(user)
+        const user_id = this.getUserIdByEmail(user.email);
+
+        // Create booking in db, if not exists.
+        this.createBooking(booking_id, user_id);
+
+        // Create flight bookings concurrently in db, if not exists.
+        flight_ids.map((flight_id: string) => {
+            this.createFlightBooking(booking_id, flight_id);
+        });
+    }
+
+    private createUser(details: User): void {
+        const query: Statement = this.db.prepare('' +
+            ' INSERT INTO Users (name, email) ' +
+            ' VALUES (?, ?); ');
+        query.run(details.name, details.email);
+    }
+
+    private createBooking(booking_reference: string, user_id: number): void {
+        const query: Statement = this.db.prepare(
+            ' ; ');
+        query.run(booking_reference, user_id);
+    }
+
+    private createFlightBooking(booking_reference: string, flight_id: string): void {
+
     }
 
     // === Deserializers, SQL-to-Web ===
 
-    private async deserializeBooking(results: SQL_Booking): Promise<Booking> {
+    private deserializeBooking(sqlBooking: SQL_Booking): Booking {
         return {
-            'booking_id': results.booking_id,
-            'customer': await this.getUser(results.user_id),
-            'flights': await this.getFlightsForBooking(results.booking_id)
-        }
+            'booking_id': sqlBooking.booking_id,
+            'customer': this.getUser(sqlBooking.user_id),
+            'flights': this.getFlightsForBooking(sqlBooking.booking_id)
+        } as Booking;
     }
 
-    private deserializeUser(results: SQL_User): User {
+    private deserializeUser(sqlUser: SQL_User): User {
         return {
-            'email': results.email,
-            'name': results.name
-        }
+            'email': sqlUser.email,
+            'name': sqlUser.name
+        } as User;
     }
 
-    private async deserializeFlights(results: SQL_Flight[]): Promise<Flight[]> {
+    private deserializeFlights(sqlFlights: SQL_Flight[]): Flight[] {
         let collation: Flight[] = [];
-        for (const flight of results) {
+        sqlFlights.forEach((flight: SQL_Flight) => {
             collation.push({
                 'flight_id': flight.flight_id,
                 'date': flight.date,
-                'route': await this.getRoute(flight.route_id)
+                'route': this.getRoute(flight.route_id)
             });
-        }
+        });
         return collation;
     }
 
-    private deserializeRoutes(results: SQL_Route[]): Route[] {
+    private deserializeRoutes(sqlRoutes: SQL_Route[]): Route[] {
         let collation: Route[] = [];
-        results.forEach((route: SQL_Route) => {
+        sqlRoutes.forEach((route: SQL_Route) => {
             collation.push({
                 'route_id': route.route_id,
                 'origin': route.origin,
@@ -323,9 +314,9 @@ class DatabaseHandler {
         return collation;
     }
 
-    private deserializeAirports(results: SQL_Airport[]): Airport[] {
+    private deserializeAirports(sqlAirports: SQL_Airport[]): Airport[] {
         let collation: Airport[] = [];
-        results.forEach((airport: SQL_Airport) => {
+        sqlAirports.forEach((airport: SQL_Airport) => {
             collation.push({
                 'icao': airport.icao,
                 'name': airport.name,
@@ -336,65 +327,37 @@ class DatabaseHandler {
         return collation;
     }
 
-    private deserializeAirport(results: SQL_Airport): Airport {
+    private deserializeAirport(sqlAirport: SQL_Airport): Airport {
         return {
-            'icao': results.icao,
-            'name': results.name,
-            'country': results.country,
-            'timezone': results.timezone
-        };
+            'icao': sqlAirport.icao,
+            'name': sqlAirport.name,
+            'country': sqlAirport.country,
+            'timezone': sqlAirport.timezone
+        } as Airport;
     }
 
-    private async deserializeService(results: SQL_Service): Promise<Service> {
+    private deserializeService(sqlService: SQL_Service): Service {
         return {
-            'service_id': results.service_id,
-            'name': results.name,
-            'jet': await this.getJet(results.jet_id)
-        };
+            'service_id': sqlService.service_id,
+            'name': sqlService.name,
+            'jet': this.getJet(sqlService.jet_id)
+        } as Service;
     }
 
-    private deserializeJet(results: SQL_Jet): Jet {
+    private deserializeJet(sqlJet: SQL_Jet): Jet {
         return {
-            'name': results.name,
-            'capacity': results.capacity,
-        };
-    }
-
-    // === Setters ===
-
-    public async bookFlightsForUser(booking_id: string, flights: string[], user: User): Promise<void> {
-        // Create user in db, if not exists.
-        await this.createUser(user)
-        const user_id = await this.getUserIdByEmail(user.email);
-
-        // Create booking in db, if not exists.
-        await this.createBooking(booking_id, user_id);
-
-        // Create flight bookings concurrently in db, if not exists.
-        await Promise.all(flights.map((flight) => {
-            this.createFlightBooking(booking_id, flight);
-        }));
-    }
-
-    private async createUser(details: User): Promise<void> {
-
-    }
-
-    private async createBooking(booking_reference: string, user_id: number): Promise<void> {
-
-    }
-
-    private async createFlightBooking(booking_reference: string, flight_id: string) {
-
+            'name': sqlJet.name,
+            'capacity': sqlJet.capacity,
+        } as Jet;
     }
 
     // === Serializers, Web-to-SQL ===
 
-    private async serializeBooking(booking: Booking): Promise<SQL_Booking> {
+    private serializeBooking(booking: Booking): SQL_Booking {
         return {
             booking_id: booking.booking_id,
-            user_id: await this.getUserIdByEmail(booking.customer.email),
-        }
+            user_id: this.getUserIdByEmail(booking.customer.email),
+        } as SQL_Booking;
     }
 }
 
