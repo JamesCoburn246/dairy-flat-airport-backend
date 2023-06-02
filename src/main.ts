@@ -54,6 +54,7 @@ interface HttpGetFlightsQueryParams {
 app.get('/api/airports', async (req: express.Request, res: express.Response) => {
     console.log('GET /api/airports');
     const airports: Airport[] = database_handler.getAllAirports();
+    console.log(airports);
     if (airports != undefined) {
         res.status(200).json(airports);
     } else {
@@ -155,9 +156,6 @@ function findRoutesBFS(origin: string, dest: string, route: Route[]): Array<Rout
     return routes;
 }
 
-function getAllServiceInformation() {
-
-}
 function generateBookingReference(): string {
     return 'B' + Math.random().toString(36).slice(2, 9).toUpperCase();
 }
