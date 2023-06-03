@@ -306,6 +306,8 @@ class DatabaseHandler {
     }
 
     private deserializeRoutes(sqlRoutes: SQL_Route[]): Route[] {
+        if (sqlRoutes == undefined)
+            throw new Error("No matching routes were found.");
         let collation: Route[] = [];
         sqlRoutes.forEach((route: SQL_Route) => {
             collation.push({
