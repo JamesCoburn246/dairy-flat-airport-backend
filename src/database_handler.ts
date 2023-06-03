@@ -138,7 +138,7 @@ class DatabaseHandler {
         const query: Statement = this.db.prepare(
             ' SELECT * FROM `bookings`' +
             ' WHERE `user_id` = ?; ');
-        return this.deserializeBookings(query.get(user_id) as SQL_Booking[]);
+        return this.deserializeBookings(query.all(user_id) as SQL_Booking[]);
     }
 
     public getUser(user_id: number): SQL_User {
@@ -165,11 +165,12 @@ class DatabaseHandler {
         const first_query: Statement = this.db.prepare(
             ' SELECT `flight_id` FROM `flight_booking_junction`' +
             ' WHERE `booking_id` = ?; ');
-        const ids = first_query.all(booking_id);
+        const result: any[] = first_query.all(booking_id);
+        const flight_ids: number[] = result.map((item) => item.flight_id);
         const second_query: Statement = this.db.prepare(
             ' SELECT * FROM `flights`' +
             ' WHERE `flight_id` IN (@values); ');
-        return this.deserializeFlights(second_query.all({ values: ids.join(',') }) as SQL_Flight[]);
+        return this.deserializeFlights(second_query.all({ values: flight_ids.join(',') }) as SQL_Flight[]);
     }
 
     private getFlightId(route_id: string, date: string): number {
