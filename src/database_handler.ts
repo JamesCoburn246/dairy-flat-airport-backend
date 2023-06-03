@@ -273,6 +273,8 @@ class DatabaseHandler {
     // === Deserializers, SQL-to-Web ===
 
     private deserializeBooking(sqlBooking: SQL_Booking): Booking {
+        if (sqlBooking == undefined)
+            throw new Error("Booking doesn't exist.");
         return {
             'booking_id': sqlBooking.booking_id,
             'customer': this.getUser(sqlBooking.user_id),
@@ -281,6 +283,8 @@ class DatabaseHandler {
     }
 
     private deserializeUser(sqlUser: SQL_User): User {
+        if (sqlUser == undefined)
+            throw new Error("User doesn't exist.");
         return {
             'email': sqlUser.email,
             'name': sqlUser.name
@@ -291,6 +295,8 @@ class DatabaseHandler {
         let collation: Flight[] = [];
         sqlFlights.forEach((flight: SQL_Flight) => {
             collation.push({
+        if (sqlFlights == undefined)
+            throw new Error("No matching flights were found.");
                 'flight_id': flight.flight_id,
                 'date': flight.date,
                 'route': this.getRoute(flight.route_id)
@@ -303,6 +309,8 @@ class DatabaseHandler {
         let collation: Route[] = [];
         sqlRoutes.forEach((route: SQL_Route) => {
             collation.push({
+        if (sqlRoutes == undefined)
+            throw new Error("No matching routes were found.");
                 'route_id': route.route_id,
                 'origin': route.origin,
                 'destination': route.destination,
@@ -315,6 +323,8 @@ class DatabaseHandler {
     }
 
     private deserializeAirports(sqlAirports: SQL_Airport[]): Airport[] {
+        if (sqlAirports == undefined)
+            throw new Error("No matching airports were found.");
         let collation: Airport[] = [];
         sqlAirports.forEach((airport: SQL_Airport) => {
             collation.push({
@@ -328,6 +338,8 @@ class DatabaseHandler {
     }
 
     private deserializeAirport(sqlAirport: SQL_Airport): Airport {
+        if (sqlAirport == undefined)
+            throw new Error("No matching airport was found.");
         return {
             'icao': sqlAirport.icao,
             'name': sqlAirport.name,
@@ -337,6 +349,8 @@ class DatabaseHandler {
     }
 
     private deserializeService(sqlService: SQL_Service): Service {
+        if (sqlService == undefined)
+            throw new Error("No matching service was found.");
         return {
             'service_id': sqlService.service_id,
             'name': sqlService.name,
@@ -345,6 +359,8 @@ class DatabaseHandler {
     }
 
     private deserializeJet(sqlJet: SQL_Jet): Jet {
+        if (sqlJet == undefined)
+            throw new Error("No matching jet was found.");
         return {
             'name': sqlJet.name,
             'capacity': sqlJet.capacity,
@@ -354,6 +370,8 @@ class DatabaseHandler {
     // === Serializers, Web-to-SQL ===
 
     private serializeBooking(booking: Booking): SQL_Booking {
+        if (booking == undefined)
+            throw new Error("No booking was provided.");
         return {
             booking_id: booking.booking_id,
             user_id: this.getUserIdByEmail(booking.customer.email),
