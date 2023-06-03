@@ -5,23 +5,14 @@ import * as fs from "fs";
 import path from "path";
 
 // NPM imports.
-import Database, {Statement, Transaction} from 'better-sqlite3';
+import Database, {RunResult, Statement, Transaction} from 'better-sqlite3';
 
 // Project imports.
 import DataInjector from "./default_data_injector";
 
 // Types.
 import {Airport, Booking, Flight, Jet, Route, Service, User} from "./types";
-import {
-    SQL_Airport,
-    SQL_Booking,
-    SQL_Flight_Booking,
-    SQL_Flight,
-    SQL_User,
-    SQL_Route,
-    SQL_Service,
-    SQL_Jet
-} from "./sql_types";
+import {SQL_Airport, SQL_Booking, SQL_Flight, SQL_Jet, SQL_Route, SQL_Service, SQL_User} from "./sql_types";
 
 
 /*
@@ -143,6 +134,13 @@ class DatabaseHandler {
         return this.deserializeBooking(query.get(booking_id) as SQL_Booking);
     }
 
+    public getBookingsByUser(user_id: number): Booking[] {
+        const query: Statement = this.db.prepare(
+            ' SELECT * FROM `bookings`' +
+            ' WHERE `user_id` = ?; ');
+        return this.deserializeBookings(query.get(user_id) as SQL_Booking[]);
+    }
+
     public getUser(user_id: number): SQL_User {
         const query: Statement = this.db.prepare(
             ' SELECT * FROM `users`' +
@@ -158,18 +156,30 @@ class DatabaseHandler {
             ' WHERE `email` = ?' +
             ' LIMIT 1; ');
         const user: SQL_User = query.get(email) as SQL_User;
+        if (user === undefined)
+            throw new Error("Provided email doesn't match any users.");
         return user.user_id;
     }
 
-    private getFlightsForBooking(booking_id: string) {
+    private getFlightsForBooking(booking_id: string): Flight[] {
         const first_query: Statement = this.db.prepare(
-            ' SELECT `flight_id` FROM `booked_flights`' +
+            ' SELECT `flight_id` FROM `flight_booking_junction`' +
             ' WHERE `booking_id` = ?; ');
         const ids = first_query.all(booking_id);
         const second_query: Statement = this.db.prepare(
             ' SELECT * FROM `flights`' +
-            ' WHERE `flight_id` IN (?); ');
-        return this.deserializeFlights(second_query.all(ids) as SQL_Flight[]);
+            ' WHERE `flight_id` IN (@values); ');
+        return this.deserializeFlights(second_query.all({ values: ids.join(',') }) as SQL_Flight[]);
+    }
+
+    private getFlightId(route_id: string, date: string): number {
+        const query: Statement = this.db.prepare(
+            ' SELECT * FROM `flights`' +
+            ' WHERE `route_id` = ? ' +
+            ' AND `date` = ?' +
+            ' LIMIT 1; '
+        );
+        return (query.get(route_id, date) as any).flight_id;
     }
 
     public getRoute(route_id: string): Route {
@@ -187,23 +197,25 @@ class DatabaseHandler {
         return this.deserializeRoutes(query.all(origin) as SQL_Route[]);
     }
 
-    public getRoutesFromTo(origin: string, dest: string): Route[] {
+    public getRoutesFromTo(origin: string, dest: string, day: string): Route[] {
         const query: Statement = this.db.prepare(
             ' SELECT * FROM `routes`' +
             ' WHERE `origin` = ?' +
-            ' AND `destination` = ?; ');
-        return this.deserializeRoutes(query.all(origin, dest) as SQL_Route[]);
+            ' AND `destination` = ?' +
+            ' AND `depart` LIKE ?; ');
+        return this.deserializeRoutes(query.all(origin, dest, (day + "%")) as SQL_Route[]);
     }
 
-    public getRoutesFromNoBacktrack(origin: string, visited: Route[]): Route[] {
+    public getRoutesFromNoBacktrack(origin: string, day: string, visited: Route[]): Route[] {
         if (visited.length == 0) {
             return this.getRoutesFrom(origin);
         } else {
             const query: Statement = this.db.prepare(
                 ' SELECT * FROM `routes`' +
                 ' WHERE `origin` = ?' +
-                ' AND `destination` NOT IN (?); ');
-            return this.deserializeRoutes(query.all(origin, visited) as SQL_Route[]);
+                ' AND `destination` NOT IN (?)' +
+                ' AND `depart` LIKE ?; ');
+            return this.deserializeRoutes(query.all(origin, visited, (day + "%")) as SQL_Route[]);
         }
     }
 
@@ -237,37 +249,58 @@ class DatabaseHandler {
         return this.deserializeJet(query.get(jet_id) as SQL_Jet);
     }
 
+    public doesBookingReferenceExist(booking_reference: string): unknown {
+        const query: Statement = this.db.prepare(
+            ' SELECT `booking_id`, COUNT(*) AS occurrence_count ' +
+            ' FROM `bookings` ' +
+            ' WHERE `booking_id` = ?; ');
+        return query.get(booking_reference);
+    }
+
     // === Setters ===
 
-    public createFlightBookingsForUser(booking_id: string, flight_ids: string[], user: User): void {
+    public createFlightBookingsForUser(booking_id: string, flights: Flight[], user: User): RunResult[] {
         // Create user in db, if not exists.
-        this.createUser(user)
-        const user_id = this.getUserIdByEmail(user.email);
+        this.createUserIfNew(user)
+        const user_id: number = this.getUserIdByEmail(user.email);
 
         // Create booking in db, if not exists.
-        this.createBooking(booking_id, user_id);
+        const booking_result = this.createBooking(booking_id, user_id);
 
         // Create flight bookings concurrently in db, if not exists.
-        flight_ids.map((flight_id: string) => {
-            this.createFlightBooking(booking_id, flight_id);
+        return flights.map((flight: Flight) => {
+            this.createFlight(flight);
+            // Fetch the flight information from the database in order to get the flight's flight_id.
+            return this.createFlightBooking(booking_id, this.getFlightId(flight.route.route_id, flight.date));
         });
     }
 
-    private createUser(details: User): void {
-        const query: Statement = this.db.prepare('' +
-            ' INSERT INTO Users (name, email) ' +
-            ' VALUES (?, ?); ');
-        query.run(details.name, details.email);
-    }
-
-    private createBooking(booking_reference: string, user_id: number): void {
+    private createUserIfNew(details: User): RunResult {
         const query: Statement = this.db.prepare(
-            ' ; ');
-        query.run(booking_reference, user_id);
+            ' INSERT OR IGNORE INTO Users (name, email) VALUES (?, ?); '
+        );
+        return query.run(details.name, details.email);
     }
 
-    private createFlightBooking(booking_reference: string, flight_id: string): void {
+    private createBooking(booking_reference: string, user_id: number): RunResult {
+        const query: Statement = this.db.prepare(
+            ' INSERT INTO Bookings (booking_id, user_id) VALUES (?, ?); '
+        );
+        return query.run(booking_reference, user_id);
+    }
 
+    private createFlight(flight: Flight) : RunResult {
+        const query: Statement = this.db.prepare(
+            ' INSERT INTO Flights (route_id, date) VALUES (?, ?); '
+        );
+        return query.run(flight.route.route_id, flight.date);
+    }
+
+    private createFlightBooking(booking_reference: string, flight_id: number): RunResult {
+        const query: Statement = this.db.prepare(
+            ' INSERT INTO flight_booking_junction (booking_id, flight_id) VALUES (?, ?); '
+        );
+        return query.run(booking_reference, flight_id);
     }
 
     // === Deserializers, SQL-to-Web ===
@@ -282,6 +315,20 @@ class DatabaseHandler {
         } as Booking;
     }
 
+    private deserializeBookings(sqlBooking: SQL_Booking[]): Booking[] {
+        if (sqlBooking == undefined)
+            throw new Error("Booking doesn't exist.");
+        let collation: Booking[] = [];
+        sqlBooking.forEach((booking: SQL_Booking) => {
+            collation.push({
+                'booking_id': booking.booking_id,
+                'customer': this.getUser(booking.user_id),
+                'flights': this.getFlightsForBooking(booking.booking_id)
+            });
+        });
+        return collation;
+    }
+
     private deserializeUser(sqlUser: SQL_User): User {
         if (sqlUser == undefined)
             throw new Error("User doesn't exist.");
@@ -292,11 +339,11 @@ class DatabaseHandler {
     }
 
     private deserializeFlights(sqlFlights: SQL_Flight[]): Flight[] {
+        if (sqlFlights == undefined)
+            throw new Error("No matching flights were found.");
         let collation: Flight[] = [];
         sqlFlights.forEach((flight: SQL_Flight) => {
             collation.push({
-        if (sqlFlights == undefined)
-            throw new Error("No matching flights were found.");
                 'flight_id': flight.flight_id,
                 'date': flight.date,
                 'route': this.getRoute(flight.route_id)
@@ -311,14 +358,12 @@ class DatabaseHandler {
         let collation: Route[] = [];
         sqlRoutes.forEach((route: SQL_Route) => {
             collation.push({
-        if (sqlRoutes == undefined)
-            throw new Error("No matching routes were found.");
                 'route_id': route.route_id,
                 'origin': route.origin,
                 'destination': route.destination,
                 'depart': route.depart,
                 'arrive': route.arrive,
-                'service': route.service_id
+                'service': this.getService(route.service_id)
             });
         });
         return collation;

@@ -10,7 +10,7 @@ export interface User {
 }
 
 export interface Flight {
-    flight_id: number
+    flight_id: number | undefined
     route: Route
     date: string // Only refers to the calendar date - departure/arrival is in Route.
 }
@@ -21,7 +21,7 @@ export interface Route {
     destination: string // Refers to Airport.icao
     depart: string
     arrive: string
-    service: number  // Refers to Service.service_id
+    service: Service
 }
 
 export interface Airport {
