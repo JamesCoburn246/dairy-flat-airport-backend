@@ -318,15 +318,13 @@ class DatabaseHandler {
     private deserializeBookings(sqlBooking: SQL_Booking[]): Booking[] {
         if (sqlBooking == undefined)
             throw new Error("Booking doesn't exist.");
-        let collation: Booking[] = [];
-        sqlBooking.forEach((booking: SQL_Booking) => {
-            collation.push({
+        return sqlBooking.map((booking: SQL_Booking) => {
+            return {
                 'booking_id': booking.booking_id,
                 'customer': this.getUser(booking.user_id),
                 'flights': this.getFlightsForBooking(booking.booking_id)
-            });
+            };
         });
-        return collation;
     }
 
     private deserializeUser(sqlUser: SQL_User): User {
@@ -341,47 +339,41 @@ class DatabaseHandler {
     private deserializeFlights(sqlFlights: SQL_Flight[]): Flight[] {
         if (sqlFlights == undefined)
             throw new Error("No matching flights were found.");
-        let collation: Flight[] = [];
-        sqlFlights.forEach((flight: SQL_Flight) => {
-            collation.push({
+        return sqlFlights.map((flight: SQL_Flight) => {
+            return {
                 'flight_id': flight.flight_id,
                 'date': flight.date,
                 'route': this.getRoute(flight.route_id)
-            });
+            };
         });
-        return collation;
     }
 
     private deserializeRoutes(sqlRoutes: SQL_Route[]): Route[] {
         if (sqlRoutes == undefined)
             throw new Error("No matching routes were found.");
-        let collation: Route[] = [];
-        sqlRoutes.forEach((route: SQL_Route) => {
-            collation.push({
+        return sqlRoutes.map((route: SQL_Route) => {
+            return {
                 'route_id': route.route_id,
                 'origin': route.origin,
                 'destination': route.destination,
                 'depart': route.depart,
                 'arrive': route.arrive,
                 'service': this.getService(route.service_id)
-            });
+            };
         });
-        return collation;
     }
 
     private deserializeAirports(sqlAirports: SQL_Airport[]): Airport[] {
         if (sqlAirports == undefined)
             throw new Error("No matching airports were found.");
-        let collation: Airport[] = [];
-        sqlAirports.forEach((airport: SQL_Airport) => {
-            collation.push({
+        return sqlAirports.map((airport: SQL_Airport) => {
+            return {
                 'icao': airport.icao,
                 'name': airport.name,
                 'country': airport.country,
                 'timezone': airport.timezone
-            });
+            };
         });
-        return collation;
     }
 
     private deserializeAirport(sqlAirport: SQL_Airport): Airport {
