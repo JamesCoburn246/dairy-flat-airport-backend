@@ -2,6 +2,7 @@ export interface Booking {
     booking_id: string
     customer: User
     flights: Flight[]
+    total_price: number
 }
 
 export interface User {
@@ -21,6 +22,7 @@ export interface Route {
     destination: string // Refers to Airport.icao
     depart: string
     arrive: string
+    price: number
     service: Service
 }
 

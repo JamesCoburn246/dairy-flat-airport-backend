@@ -1,10 +1,16 @@
 'use strict';
 
+/*
+ * James Coburn
+ * 19044568 2023
+ * Semester 1
+ */
+
 // Built-in imports.
 import * as fs from "fs";
 import path from "path";
 
-// NPM imports.
+// Database driver (NPM import).
 import Database, {RunResult, Statement, Transaction} from 'better-sqlite3';
 
 // Project imports.
@@ -33,7 +39,9 @@ class DatabaseHandler {
         }
 
         // Ensure database file exists.
-        fs.writeFileSync(filePath, '');
+        if (!fs.existsSync(filePath)) {
+            fs.writeFileSync(filePath, '');
+        }
 
         // Access database file.
         this.db = new Database(filePath);
@@ -56,9 +64,11 @@ class DatabaseHandler {
 
     private validateTables(): void {
         const create_bookings_table_query: Statement = this.db.prepare(
-            'CREATE TABLE IF NOT EXISTS bookings ( ' +
+            'CREATE TABLE IF NOT EXISTS `bookings`' +
+            ' ( ' +
             '  `booking_id` TEXT PRIMARY KEY, ' +
-            '  `user_id` INTEGER NOT NULL ' +
+            '  `user_id` INTEGER NOT NULL, ' +
+            '  `total_price` INTEGER NOT NULL ' +
             '); ');
         const create_users_table_query: Statement = this.db.prepare(
             'CREATE TABLE IF NOT EXISTS `users` ( ' +
@@ -85,6 +95,7 @@ class DatabaseHandler {
             '  `destination` TEXT NOT NULL, ' +
             '  `depart` TEXT NOT NULL, ' +
             '  `arrive` TEXT NOT NULL, ' +
+            '  `price` NUMBER NOT NULL, ' +
             '  `service_id` INTEGER NOT NULL, ' +
             '  PRIMARY KEY (`route_id`) ' +
             ' ); ');
@@ -126,7 +137,7 @@ class DatabaseHandler {
 
     // === Getters ===
 
-    public getBooking(booking_id: string): Booking {
+    public async getBooking(booking_id: string): Promise<Booking> {
         const query: Statement = this.db.prepare(
             ' SELECT * FROM `bookings`' +
             ' WHERE `booking_id` = ?' +
@@ -219,15 +230,6 @@ class DatabaseHandler {
             return this.deserializeRoutes(query.all(origin, visited, (day + "%")) as SQL_Route[]);
         }
     }
-
-    public getAirport(airport_icao: string): Airport {
-        const query: Statement = this.db.prepare(
-            ' SELECT * FROM `airports`' +
-            ' WHERE `icao` = ?' +
-            ' LIMIT 1; ');
-        return this.deserializeAirport(query.get(airport_icao) as Airport);
-    }
-
     public getAllAirports(): Airport[] {
         const query: Statement = this.db.prepare(
             ' SELECT * FROM `airports`; ');
@@ -255,7 +257,8 @@ class DatabaseHandler {
             ' SELECT `booking_id`, COUNT(*) AS occurrence_count ' +
             ' FROM `bookings` ' +
             ' WHERE `booking_id` = ?; ');
-        return query.get(booking_reference);
+        const result: any = query.get(booking_reference);
+        return result.occurrence_count;
     }
 
     // === Setters ===
@@ -265,8 +268,15 @@ class DatabaseHandler {
         this.createUserIfNew(user)
         const user_id: number = this.getUserIdByEmail(user.email);
 
+        flights.forEach((flight: Flight) => {
+            if (!this.hasFlightGotRoom(flight)) {
+                throw new Error("There are no seats left on this flight!");
+            }
+        });
+
         // Create booking in db, if not exists.
-        const booking_result = this.createBooking(booking_id, user_id);
+        const total_price: number = this.sumFlightCosts(flights);
+        this.createBooking(booking_id, user_id, total_price);
 
         // Create flight bookings concurrently in db, if not exists.
         return flights.map((flight: Flight) => {
@@ -278,14 +288,23 @@ class DatabaseHandler {
 
     private createUserIfNew(details: User): RunResult {
         const query: Statement = this.db.prepare(
-            ' INSERT OR IGNORE INTO Users (name, email) VALUES (?, ?); '
+            ' INSERT OR IGNORE INTO `Users` (name, email) VALUES (?, ?); '
         );
         return query.run(details.name, details.email);
     }
 
-    private createBooking(booking_reference: string, user_id: number): RunResult {
+    private createBooking(booking_reference: string, user_id: number, total_price: number): RunResult {
         const query: Statement = this.db.prepare(
-            ' INSERT INTO Bookings (booking_id, user_id) VALUES (?, ?); '
+            ' INSERT INTO `Bookings` (booking_id, user_id) VALUES (?, ?, ?); '
+        );
+        return query.run(booking_reference, user_id, total_price);
+    }
+
+    public deleteBooking(booking_reference: string, user_id: number): RunResult {
+        const query: Statement = this.db.prepare(
+            ' DELETE FROM Bookings ' +
+            ' WHERE `booking_id` = ? ' +
+            ' AND `user_id` = ?; '
         );
         return query.run(booking_reference, user_id);
     }
@@ -309,10 +328,12 @@ class DatabaseHandler {
     private deserializeBooking(sqlBooking: SQL_Booking): Booking {
         if (sqlBooking == undefined)
             throw new Error("Booking doesn't exist.");
+        const flights: Flight[] = this.getFlightsForBooking(sqlBooking.booking_id);
         return {
             'booking_id': sqlBooking.booking_id,
             'customer': this.getUser(sqlBooking.user_id),
-            'flights': this.getFlightsForBooking(sqlBooking.booking_id)
+            'flights': flights,
+            'total_price': this.sumFlightCosts(flights)
         } as Booking;
     }
 
@@ -323,20 +344,11 @@ class DatabaseHandler {
             return {
                 'booking_id': booking.booking_id,
                 'customer': this.getUser(booking.user_id),
-                'flights': this.getFlightsForBooking(booking.booking_id)
+                'flights': this.getFlightsForBooking(booking.booking_id),
+                'total_price': booking.total_price
             };
         });
     }
-
-    private deserializeUser(sqlUser: SQL_User): User {
-        if (sqlUser == undefined)
-            throw new Error("User doesn't exist.");
-        return {
-            'email': sqlUser.email,
-            'name': sqlUser.name
-        } as User;
-    }
-
     private deserializeFlights(sqlFlights: SQL_Flight[]): Flight[] {
         if (sqlFlights == undefined)
             throw new Error("No matching flights were found.");
@@ -359,6 +371,7 @@ class DatabaseHandler {
                 'destination': route.destination,
                 'depart': route.depart,
                 'arrive': route.arrive,
+                'price': route.price,
                 'service': this.getService(route.service_id)
             };
         });
@@ -367,14 +380,7 @@ class DatabaseHandler {
     private deserializeAirports(sqlAirports: SQL_Airport[]): Airport[] {
         if (sqlAirports == undefined)
             throw new Error("No matching airports were found.");
-        return sqlAirports.map((airport: SQL_Airport) => {
-            return {
-                'icao': airport.icao,
-                'name': airport.name,
-                'country': airport.country,
-                'timezone': airport.timezone
-            };
-        });
+        return sqlAirports.map((airport: SQL_Airport) => this.deserializeAirport(airport));
     }
 
     private deserializeAirport(sqlAirport: SQL_Airport): Airport {
@@ -407,15 +413,21 @@ class DatabaseHandler {
         } as Jet;
     }
 
-    // === Serializers, Web-to-SQL ===
+    // === Misc. ===
 
-    private serializeBooking(booking: Booking): SQL_Booking {
-        if (booking == undefined)
-            throw new Error("No booking was provided.");
-        return {
-            booking_id: booking.booking_id,
-            user_id: this.getUserIdByEmail(booking.customer.email),
-        } as SQL_Booking;
+    private sumFlightCosts(flights: Flight[]): number {
+        return flights
+            .map((flight: Flight) => flight.route.price)
+            .reduce((currentValue: number, price: number) => currentValue + price, 0);
+    }
+
+    private hasFlightGotRoom(flight: Flight) {
+        const capacity: number = flight.route.service.jet.capacity;
+        const query: Statement = this.db.prepare(' SELECT COUNT(*) as booked_seats ' +
+            ' FROM `flight_booking_junction` ' +
+            ' WHERE `flight_id` = ?; ');
+        const result: any = query.get(flight.flight_id);
+        return capacity > result.booked_seats;
     }
 }
 

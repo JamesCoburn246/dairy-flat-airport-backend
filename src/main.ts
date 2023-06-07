@@ -1,15 +1,22 @@
 'use strict';
 
-/**
- * Required External Modules
+/*
+ * James Coburn
+ * 19044568 2023
+ * Semester 1
  */
+
+// Database handler.
 import DatabaseHandler from "./database_handler";
+
 // Environment variable handler.
 import * as dotenv from "dotenv";
-// Networking.
+
+// REST networking.
 import express, {Express, Request, Response} from "express";
 import cors from "cors";
 import helmet from "helmet";
+
 // Types.
 import {Airport, Booking, Flight, Route, User} from "./types";
 import {RunResult} from "better-sqlite3";
@@ -43,7 +50,7 @@ app.listen(EXPRESS_PORT, () => {
 });
 
 app.post('/api/ping', (req: Request, res: Response) => {
-    res.status(200).send('Pong');
+    return res.status(200).send('Pong');
 });
 
 // Used when fetching available airport nodes.
@@ -51,9 +58,9 @@ app.get('/api/airports', async (req: express.Request, res: express.Response) => 
     console.info('GET /api/airports');
     const airports: Airport[] = database_handler.getAllAirports();
     if (airports != undefined) {
-        res.status(200).json(airports);
+        return res.status(200).json(airports);
     } else {
-        res.status(500).send("Internal Server Error.");
+        return res.status(500).send("Internal Server Error.");
     }
 });
 
@@ -77,23 +84,23 @@ app.get('/api/routes', async (req: express.Request<{}, {}, {}, { to: string, fro
         const flightsToFrom: Route[] = database_handler.getRoutesFromTo(origin, destination, dayOfWeek);
         console.log(flightsToFrom)
         // If there are direct legs, return those. Otherwise, find a route to connect.
-        if (flightsToFrom.length === 0) {
-            const flights: Array<Route[]> = findRoutesBFS(origin, destination, dayOfWeek, []);
-            if (flights.length === 0) {
-                res.status(404).send("No flights were found matching those filters.");
-            } else {
-                res.status(200).json(flights);
-            }
+        if (flightsToFrom.length !== 0) {
+            const route_options: Array<Route[]> = flightsToFrom.map((route: Route) => [route]);
+            return res.status(200).json(route_options);
         } else {
-            // TODO EACH ELEMENT OF THIS LIST NEEDS TO BE PUT INTO AN ARRAY OF SIZE ONE.
-            res.status(200).json([flightsToFrom]);
+            const route_options: Array<Route[]> = findRoutesBFS(origin, destination, dayOfWeek, []);
+            if (route_options.length !== 0) {
+                return res.status(200).json(route_options);
+            } else {
+                return res.status(404).send("No flights were found matching those filters.");
+            }
         }
     } catch (e) {
         console.error(e);
         if (e instanceof Error) {
-            res.status(500).send(e.message);
+            return res.status(500).send(e.message);
         } else {
-            res.status(500).send("Internal Server Error.");
+            return res.status(500).send("Internal Server Error.");
         }
     }
 });
@@ -107,9 +114,18 @@ app.get('/api/booking', async (req: express.Request<{}, {}, {}, {id: string}>, r
             return res.status(400).send("Bad Request.");
         }
 
-        const booking: Booking = database_handler.getBooking(req.query.id);
-
-        res.status(200).json(booking);
+        database_handler.getBooking(req.query.id)
+            .then((booking: Booking) => {
+                return res.status(200).json(booking);
+            })
+            // Catch booking doesn't exist error.
+            .catch((error: Error) => {
+                if (error.message === "Booking doesn't exist.") {
+                    return res.status(204).send("Booking doesn't exist.");
+                } else {
+                    throw error;
+                }
+            });
     } catch (e) {
         console.error(e);
         if (e instanceof Error) {
@@ -125,13 +141,13 @@ app.post('/api/booking', async (req: express.Request<{}, {}, {flights: Flight[],
     console.info("POST /api/booking", req.query, req.body);
     try {
         if (req.body.name == undefined || req.body.email == undefined || req.body.flights == undefined) {
-            res.status(400).send("Bad Request");
-        } // TODO Currently, FLIGHTS refers to ROUTES here.
+            return res.status(400).send("Bad Request");
+        }
         const user_details: User = {
             'name': req.body.name,
             'email': req.body.email,
         };
-        const booking_reference = generateBookingReference();
+        const booking_reference: string = generateBookingReference();
         const result: RunResult[] = database_handler.createFlightBookingsForUser(
             booking_reference,
             req.body.flights,
@@ -141,14 +157,13 @@ app.post('/api/booking', async (req: express.Request<{}, {}, {flights: Flight[],
         console.log('booking result ', result);
 
         // Redirect the frontend to view the newly-created booking.
-        res.redirect('http://localhost:3000/bookings/view/' + booking_reference);
-        // TODO res.redirect(req.baseUrl + '/bookings/view/' + booking_reference);
+        return res.redirect('http://localhost:3000/bookings/view/' + booking_reference);
     } catch (e) {
         console.error(e);
         if (e instanceof Error) {
-            res.status(500).send(e.message);
+            return res.status(500).send(e.message);
         } else {
-            res.status(500).send("Internal Server Error");
+            return res.status(500).send("Internal Server Error");
         }
     }
 });
@@ -169,19 +184,64 @@ app.get('/api/bookings', async (req: express.Request<{}, {}, {}, {email: string}
     } catch (e) {
         console.error(e);
         if (e instanceof Error) {
-            res.status(500).send(e.message);
+            return res.status(500).send(e.message);
         } else {
-            res.status(500).send("Internal Server Error.");
+            return res.status(500).send("Internal Server Error.");
+        }
+    }
+});
+
+// /api/bookings?id=B1234567
+// Used to cancel a booking made by a single user.
+app.delete('/api/bookings', async (req: express.Request<{}, {}, {email: string}, {id: string}>, res: express.Response) => {
+    console.info("GET /api/bookings", req.query, req.body);
+    try {
+        // Check incoming data.
+        if (req.query.id == undefined) {
+            return res.status(400).send("Bad Request.");
+        }
+        if (req.body.email == undefined) {
+            return res.status(401).send("Unauthorized.");
+        }
+
+        // Declare variables.
+        const booking_id: string = req.query.id;
+        const email: string = req.body.email;
+        const user_id: number = database_handler.getUserIdByEmail(email);
+
+        // Check if the user is associated with the booking.
+        database_handler.getBooking(booking_id)
+            .then((booking: Booking) => {
+                if (booking.customer.email.toLowerCase() !== email.toLowerCase()) {
+                    return res.status(401).send("Unauthorized.");
+                }
+                database_handler.deleteBooking(booking_id, user_id);
+                res.status(200).send("Booking deleted successfully.");
+            })
+            // Catch booking doesn't exist error.
+            .catch((error: Error) => {
+                if (error.message === "Booking doesn't exist.") {
+                    return res.status(204).send("Booking doesn't exist.");
+                } else {
+                    throw error;
+                }
+            });
+    } catch (e) {
+        console.error(e);
+        if (e instanceof Error) {
+            return res.status(500).send(e.message);
+        } else {
+            return res.status(500).send("Internal Server Error.");
         }
     }
 });
 
 app.get('*', (req: express.Request, res: express.Response) => {
-    res.status(404).send('No API route matched.');
+    return res.status(404).send('No API route matched.');
 });
 
 app.post('*', (req: express.Request, res: express.Response) => {
-    res.status(404).send('No API route matched.');
+    return res.status(404).send('No API route matched.');
 });
 
 // 1. Get all legs that start with origin.
@@ -215,12 +275,10 @@ function findRoutesBFS(origin: string, dest: string, dayOfWeek: string, route: R
 function generateBookingReference(): string {
     // Generate a booking reference.
     const attempt = 'B' + Math.random().toString(36).slice(2, 7).toUpperCase();
-    // Check the database to see if it has been used before.
-    const result: any = database_handler.doesBookingReferenceExist(attempt);
-    // If it has been used before, generate a new one.
-    if (result.occurrence_count === 0) {
-        return attempt;
-    } else {
+    // Check the database to see if it has been used before. If it has been used before, generate a new one.
+    if (database_handler.doesBookingReferenceExist(attempt)) {
         return generateBookingReference();
+    } else {
+        return attempt;
     }
 }

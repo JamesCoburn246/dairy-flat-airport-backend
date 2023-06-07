@@ -1,6 +1,7 @@
 export interface SQL_Booking {
     booking_id: string // PRIMARY KEY
     user_id: number // FOREIGN KEY
+    total_price: number
 }
 
 export interface SQL_User {
@@ -8,13 +9,6 @@ export interface SQL_User {
     name: string
     email: string
 }
-
-export interface SQL_Flight_Booking {
-    id: number // PRIMARY KEY, HIDDEN
-    booking_id: string // FOREIGN KEY
-    flight_id: number // FOREIGN KEY
-}
-
 export interface SQL_Flight {
     flight_id: number // PRIMARY KEY, HIDDEN
     route_id: string // FOREIGN KEY
@@ -27,6 +21,7 @@ export interface SQL_Route { // READ-ONLY
     destination: string // FOREIGN KEY
     depart: string
     arrive: string
+    price: number
     service_id: number // FOREIGN KEY
 }
 
